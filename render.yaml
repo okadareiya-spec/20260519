@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: lion-senpai-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false  # Render ダッシュボードから手動で設定
+      - key: LINE_CHANNEL_SECRET
+        sync: false  # Render ダッシュボードから手動で設定
+      - key: ANTHROPIC_API_KEY
+        sync: false  # Render ダッシュボードから手動で設定
+      - key: DB_DIR
+        value: /data  # 永続ディスクのマウントパス
+    disk:
+      name: conversations-db
+      mountPath: /data
+      sizeGB: 1
