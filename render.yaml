@@ -11,9 +11,7 @@ services:
         sync: false  # Render ダッシュボードから手動で設定
       - key: ANTHROPIC_API_KEY
         sync: false  # Render ダッシュボードから手動で設定
-      - key: DB_DIR
-        value: /data  # 永続ディスクのマウントパス
-    disk:
-      name: conversations-db
-      mountPath: /data
-      sizeGB: 1
+      - key: UPSTASH_REDIS_REST_URL
+        sync: false  # Upstash コンソールから取得
+      - key: UPSTASH_REDIS_REST_TOKEN
+        sync: false  # Upstash コンソールから取得

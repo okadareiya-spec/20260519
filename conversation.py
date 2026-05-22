@@ -1,52 +1,29 @@
-"""ユーザー別・日次セッションの会話履歴をSQLiteで管理するモジュール。"""
+"""ユーザー別・日次セッションの会話履歴を Upstash Redis で管理するモジュール。"""
 
 import json
 import logging
 import os
-import sqlite3
 from datetime import date
-from pathlib import Path
 from typing import Any
+
+from upstash_redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
 
-_DB_DIR = os.environ.get("DB_DIR")
-if _DB_DIR is None:
-    logger.warning(
-        "DB_DIR が未設定です。データはデプロイのたびにリセットされます。"
-        "Render Persistent Disk を設定することを推奨します。"
-    )
-DB_PATH = Path(_DB_DIR or ".") / "conversations.db"
+_redis = Redis(
+    url=os.environ["UPSTASH_REDIS_REST_URL"],
+    token=os.environ["UPSTASH_REDIS_REST_TOKEN"],
+)
 
 MAX_TURNS = 20
 _MAX_HISTORY_ENTRIES = MAX_TURNS * 2  # user + assistant のペアで1ターン
 
 
-def _connect() -> sqlite3.Connection:
-    """SQLiteデータベースへの接続を返す。
-
-    Returns:
-        sqlite3.Connection: データベース接続オブジェクト。
-    """
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _key(user_id: str) -> str:
+    return f"lion:conv:{user_id}:{date.today()}"
 
 
-def init_db() -> None:
-    """テーブルが存在しない場合に作成する。"""
-    with _connect() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS conversations (
-                user_id TEXT NOT NULL,
-                session_date TEXT NOT NULL,
-                messages TEXT NOT NULL DEFAULT '[]',
-                PRIMARY KEY (user_id, session_date)
-            )
-        """)
-
-
-def get_history(user_id: str) -> list[dict[str, Any]]:
+async def get_history(user_id: str) -> list[dict[str, Any]]:
     """当日セッションの会話履歴を返す。日付が変わっていれば空リストを返す。
 
     Args:
@@ -55,32 +32,22 @@ def get_history(user_id: str) -> list[dict[str, Any]]:
     Returns:
         当日の会話履歴。新セッションの場合は空リスト。
     """
-    today = str(date.today())
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT messages FROM conversations WHERE user_id = ? AND session_date = ?",
-            (user_id, today),
-        ).fetchone()
-    if row is None:
+    data = await _redis.get(_key(user_id))
+    if data is None:
         return []
-    return json.loads(row["messages"])
+    return json.loads(data)
 
 
-def save_history(user_id: str, messages: list[dict[str, Any]]) -> None:
+async def save_history(user_id: str, messages: list[dict[str, Any]]) -> None:
     """当日セッションの会話履歴を保存する。直近 MAX_TURNS ターンに切り詰める。
 
     Args:
         user_id: LINE ユーザーID。
         messages: 保存するメッセージリスト。
     """
-    today = str(date.today())
     trimmed = messages[-_MAX_HISTORY_ENTRIES:]
-    with _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO conversations (user_id, session_date, messages)
-            VALUES (?, ?, ?)
-            ON CONFLICT(user_id, session_date) DO UPDATE SET messages = excluded.messages
-            """,
-            (user_id, today, json.dumps(trimmed, ensure_ascii=False)),
-        )
+    await _redis.set(
+        _key(user_id),
+        json.dumps(trimmed, ensure_ascii=False),
+        ex=86400,  # キーは24時間でTTL切れ（翌日は自動的に新セッション）
+    )
