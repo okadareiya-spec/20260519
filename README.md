@@ -55,8 +55,8 @@ LINE Messaging API（Reply API）
 
 ### 日次セッション管理
 
-- Redisキーに日付を含める（`lion:conv:{user_id}:2026-05-22`）
-- TTL を 86400秒（24h）に設定
+- Redisキーに日付を含める（`lion:conv:{user_id}:{YYYY-MM-DD}`）
+- TTL を `_TTL_SECONDS`（24h = 86400秒）に設定
 - 日付が変わると前日のキーは参照されず自動的に新セッション開始
 
 ### 会話終了検知
