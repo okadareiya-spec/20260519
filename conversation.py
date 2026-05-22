@@ -17,10 +17,12 @@ _redis = Redis(
 
 MAX_TURNS = 20
 _MAX_HISTORY_ENTRIES = MAX_TURNS * 2  # user + assistant のペアで1ターン
+_TTL_SECONDS = 60 * 60 * 24  # 24時間
+_KEY_PREFIX = "lion:conv"
 
 
 def _key(user_id: str) -> str:
-    return f"lion:conv:{user_id}:{date.today()}"
+    return f"{_KEY_PREFIX}:{user_id}:{date.today()}"
 
 
 async def get_history(user_id: str) -> list[dict[str, Any]]:
@@ -49,5 +51,5 @@ async def save_history(user_id: str, messages: list[dict[str, Any]]) -> None:
     await _redis.set(
         _key(user_id),
         json.dumps(trimmed, ensure_ascii=False),
-        ex=86400,  # キーは24時間でTTL切れ（翌日は自動的に新セッション）
+        ex=_TTL_SECONDS,
     )

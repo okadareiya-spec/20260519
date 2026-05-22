@@ -120,7 +120,6 @@ async def _handle_message(user_id: str, reply_token: str, user_text: str) -> Non
     # 当日の履歴がない場合は新セッション（日付をまたいだ初回）
     if not history:
         await _reply_line(reply_token, WELCOME_MESSAGE)
-        # 相談内容はそのまま新セッションの最初のメッセージとして処理を続ける
 
     history.append({"role": "user", "content": user_text})
 
