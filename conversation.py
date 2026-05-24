@@ -53,3 +53,45 @@ async def save_history(user_id: str, messages: list[dict[str, Any]]) -> None:
         json.dumps(trimmed, ensure_ascii=False),
         ex=_TTL_SECONDS,
     )
+
+
+async def clear_history(user_id: str) -> None:
+    """当日セッションの会話履歴を削除する。ロール切り替え・会話終了時に使用。
+
+    Args:
+        user_id: LINE ユーザーID。
+    """
+    await _redis.delete(_key(user_id))
+
+
+_ROLE_PREFIX = "lion:role"
+_ROLE_TTL = 60 * 60 * 24 * 7  # ロールは1週間保持（日付またいでも維持）
+
+
+def _role_key(user_id: str) -> str:
+    return f"{_ROLE_PREFIX}:{user_id}"
+
+
+async def get_role(user_id: str) -> str:
+    """ユーザーの現在のロールを返す。未設定の場合は 'advisor'。
+
+    Args:
+        user_id: LINE ユーザーID。
+
+    Returns:
+        'advisor' または 'teacher'。
+    """
+    data = await _redis.get(_role_key(user_id))
+    if data is None:
+        return "advisor"
+    return data
+
+
+async def save_role(user_id: str, role: str) -> None:
+    """ユーザーのロールを保存する。
+
+    Args:
+        user_id: LINE ユーザーID。
+        role: 'advisor' または 'teacher'。
+    """
+    await _redis.set(_role_key(user_id), role, ex=_ROLE_TTL)

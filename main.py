@@ -12,7 +12,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 
 import conversation as conv
-from system_prompt import build_system_prompt
+from system_prompt import get_advisor_prompt, get_teacher_prompt, get_teacher_welcome
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,11 +24,24 @@ ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
 CLAUDE_MODEL = "claude-sonnet-4-6"
 CLOSE_SIGNAL = "CLOSE_CONVERSATION"
-WELCOME_MESSAGE = "何かあれば気軽に話しかけてください。"
+
+# リッチメニューのボタンが送信するテキスト（大文字固定）
+CMD_SWITCH_TEACHER = "SWITCH_TEACHER"
+CMD_SWITCH_ADVISOR = "SWITCH_ADVISOR"
+CMD_END_CONVERSATION = "END_CONVERSATION"
+
+ADVISOR_WELCOME = (
+    "おつかれさまです。今日の業務で迷ったことや、上司・クライアントとのやりとりで困ったことがあれば気軽に話しかけてください。\n"
+    "例）「上司から急に競合調査を頼まれたが、何から始めればいいか分からない」\n"
+    "例）「クライアントへの報告前にゴールが整理できていない」"
+)
 
 anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
-SYSTEM_PROMPT = build_system_prompt()
 
+# 起動時に両ロールのプロンプトを生成しておく
+ADVISOR_SYSTEM_PROMPT = get_advisor_prompt()
+TEACHER_SYSTEM_PROMPT = get_teacher_prompt()
+TEACHER_WELCOME = get_teacher_welcome()
 
 app = FastAPI()
 
@@ -46,12 +59,12 @@ def _verify_signature(body: bytes, signature: str) -> bool:
     )
 
 
-async def _call_claude(messages: list[dict]) -> str:
+async def _call_claude(messages: list[dict], system_prompt: str) -> str:
     """Claude API を非同期で呼び出して応答テキストを返す。"""
     response = await anthropic_client.messages.create(
         model=CLAUDE_MODEL,
         max_tokens=1024,
-        system=SYSTEM_PROMPT,
+        system=system_prompt,
         messages=messages,
     )
     return response.content[0].text.strip()
@@ -117,20 +130,42 @@ async def _handle_message(user_id: str, reply_token: str, user_text: str) -> Non
         reply_token: LINE リプライトークン。
         user_text: ユーザーのメッセージ本文。
     """
+    # --- リッチメニューコマンドの処理（Claude呼び出し不要）---
+    if user_text == CMD_END_CONVERSATION:
+        await conv.clear_history(user_id)
+        return
+
+    if user_text == CMD_SWITCH_TEACHER:
+        await conv.clear_history(user_id)
+        await conv.save_role(user_id, "teacher")
+        await _reply_line(reply_token, TEACHER_WELCOME)
+        return
+
+    if user_text == CMD_SWITCH_ADVISOR:
+        await conv.clear_history(user_id)
+        await conv.save_role(user_id, "advisor")
+        await _reply_line(reply_token, ADVISOR_WELCOME)
+        return
+
+    # --- 通常メッセージの処理 ---
+    role = await conv.get_role(user_id)
     history = await conv.get_history(user_id)
     is_new_session = not history
+
+    system_prompt = TEACHER_SYSTEM_PROMPT if role == "teacher" else ADVISOR_SYSTEM_PROMPT
+    welcome = TEACHER_WELCOME if role == "teacher" else ADVISOR_WELCOME
 
     history.append({"role": "user", "content": user_text})
 
     try:
-        reply_text = await _call_claude(history)
+        reply_text = await _call_claude(history, system_prompt)
     except Exception as e:
         logger.error("Claude API error: %s", e)
         # ユーザー発言を保存せずにエラー返信（履歴の交互性を維持するため）
         history.pop()
         await conv.save_history(user_id, history)
         error_msg = "少し時間をおいてから再度お試しください。"
-        await _reply_line(reply_token, [WELCOME_MESSAGE, error_msg] if is_new_session else error_msg)
+        await _reply_line(reply_token, [welcome, error_msg] if is_new_session else error_msg)
         return
 
     # クローズサインを受け取った場合は返信せず待機
@@ -139,14 +174,14 @@ async def _handle_message(user_id: str, reply_token: str, user_text: str) -> Non
         history.pop()  # 追加済みのユーザーメッセージを取り消す
         await conv.save_history(user_id, history)
         if is_new_session:
-            await _reply_line(reply_token, WELCOME_MESSAGE)
+            await _reply_line(reply_token, welcome)
         return
 
     history.append({"role": "assistant", "content": reply_text})
     await conv.save_history(user_id, history)
     # 新セッション時はウェルカムメッセージとAI返答を1回のAPI呼び出しでまとめて送る
     # （Reply トークンは1回しか使えないため、分けて送ると2回目が 400 Invalid reply token になる）
-    await _reply_line(reply_token, [WELCOME_MESSAGE, reply_text] if is_new_session else reply_text)
+    await _reply_line(reply_token, [welcome, reply_text] if is_new_session else reply_text)
 
 
 @app.get("/health")
