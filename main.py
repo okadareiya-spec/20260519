@@ -57,15 +57,17 @@ async def _call_claude(messages: list[dict]) -> str:
     return response.content[0].text.strip()
 
 
-async def _reply_line(reply_token: str, text: str) -> None:
-    """LINE Messaging API で返信する。"""
+async def _reply_line(reply_token: str, texts: str | list[str]) -> None:
+    """LINE Messaging API で返信する。texts はリストで複数バブル同時送信可能（最大5件）。"""
+    if isinstance(texts, str):
+        texts = [texts]
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
     }
     payload = {
         "replyToken": reply_token,
-        "messages": [{"type": "text", "text": text}],
+        "messages": [{"type": "text", "text": t} for t in texts],
     }
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.post(LINE_REPLY_URL, headers=headers, json=payload)
@@ -116,10 +118,7 @@ async def _handle_message(user_id: str, reply_token: str, user_text: str) -> Non
         user_text: ユーザーのメッセージ本文。
     """
     history = await conv.get_history(user_id)
-
-    # 当日の履歴がない場合は新セッション（日付をまたいだ初回）
-    if not history:
-        await _reply_line(reply_token, WELCOME_MESSAGE)
+    is_new_session = not history
 
     history.append({"role": "user", "content": user_text})
 
@@ -130,7 +129,8 @@ async def _handle_message(user_id: str, reply_token: str, user_text: str) -> Non
         # ユーザー発言を保存せずにエラー返信（履歴の交互性を維持するため）
         history.pop()
         await conv.save_history(user_id, history)
-        await _reply_line(reply_token, "少し時間をおいてから再度お試しください。")
+        error_msg = "少し時間をおいてから再度お試しください。"
+        await _reply_line(reply_token, [WELCOME_MESSAGE, error_msg] if is_new_session else error_msg)
         return
 
     # クローズサインを受け取った場合は返信せず待機
@@ -138,11 +138,15 @@ async def _handle_message(user_id: str, reply_token: str, user_text: str) -> Non
     if reply_text == CLOSE_SIGNAL or reply_text.startswith(CLOSE_SIGNAL):
         history.pop()  # 追加済みのユーザーメッセージを取り消す
         await conv.save_history(user_id, history)
+        if is_new_session:
+            await _reply_line(reply_token, WELCOME_MESSAGE)
         return
 
     history.append({"role": "assistant", "content": reply_text})
     await conv.save_history(user_id, history)
-    await _reply_line(reply_token, reply_text)
+    # 新セッション時はウェルカムメッセージとAI返答を1回のAPI呼び出しでまとめて送る
+    # （Reply トークンは1回しか使えないため、分けて送ると2回目が 400 Invalid reply token になる）
+    await _reply_line(reply_token, [WELCOME_MESSAGE, reply_text] if is_new_session else reply_text)
 
 
 @app.get("/health")
