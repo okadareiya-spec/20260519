@@ -177,10 +177,7 @@ async def _process_message(user_id: str, reply_token: str, user_text: str) -> No
     # --- 通常メッセージの処理 ---
     role = await conv.get_role(user_id)
     history = await conv.get_history(user_id)
-    is_new_session = not history
-
     system_prompt = TEACHER_SYSTEM_PROMPT if role == "teacher" else ADVISOR_SYSTEM_PROMPT
-    welcome = TEACHER_WELCOME if role == "teacher" else ADVISOR_WELCOME
 
     history.append({"role": "user", "content": user_text})
 
@@ -188,12 +185,9 @@ async def _process_message(user_id: str, reply_token: str, user_text: str) -> No
         reply_text = await _call_claude(history, system_prompt)
     except Exception as e:
         logger.error("Claude API error: %s", e)
-        # ユーザー発言を保存せずにエラー返信（履歴の交互性を維持するため）
         history.pop()
         await conv.save_history(user_id, history)
-        error_msg = "少し時間をおいてから再度お試しください。"
-        msgs = [welcome, error_msg] if is_new_session else [error_msg]
-        await _reply_line(reply_token, msgs)
+        await _reply_line(reply_token, "少し時間をおいてから再度お試しください。")
         return
 
     # クローズサインを受け取った場合は返信せず待機
@@ -201,18 +195,11 @@ async def _process_message(user_id: str, reply_token: str, user_text: str) -> No
     if reply_text == CLOSE_SIGNAL or reply_text.startswith(CLOSE_SIGNAL):
         history.pop()  # 追加済みのユーザーメッセージを取り消す
         await conv.save_history(user_id, history)
-        if is_new_session:
-            await _reply_line(reply_token, welcome)
         return
 
     history.append({"role": "assistant", "content": reply_text})
     await conv.save_history(user_id, history)
-    # 新セッション時はウェルカムメッセージとAI返答を1回のAPI呼び出しでまとめて送る
-    # （Reply トークンは1回しか使えないため、分けて送ると2回目が 400 Invalid reply token になる）
-    if is_new_session:
-        await _reply_line(reply_token, await _with_notice(user_id, [welcome, reply_text]))
-    else:
-        await _reply_line(reply_token, reply_text)
+    await _reply_line(reply_token, reply_text)
 
 
 @app.get("/health")
