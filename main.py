@@ -176,10 +176,8 @@ async def _handle_message(user_id: str, reply_token: str, user_text: str) -> Non
         history.pop()
         await conv.save_history(user_id, history)
         error_msg = "少し時間をおいてから再度お試しください。"
-        if is_new_session:
-            await _reply_line(reply_token, [USAGE_NOTICE, welcome, error_msg])
-        else:
-            await _reply_line(reply_token, error_msg)
+        msgs = [welcome, error_msg] if is_new_session else [error_msg]
+        await _reply_line(reply_token, msgs)
         return
 
     # クローズサインを受け取った場合は返信せず待機
@@ -188,7 +186,7 @@ async def _handle_message(user_id: str, reply_token: str, user_text: str) -> Non
         history.pop()  # 追加済みのユーザーメッセージを取り消す
         await conv.save_history(user_id, history)
         if is_new_session:
-            await _reply_line(reply_token, [USAGE_NOTICE, welcome])
+            await _reply_line(reply_token, welcome)
         return
 
     history.append({"role": "assistant", "content": reply_text})
