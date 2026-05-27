@@ -55,7 +55,7 @@ app = FastAPI()
 
 
 async def _with_notice(user_id: str, msgs: list[str]) -> list[str]:
-    """初回のみ USAGE_NOTICE を先頭に追加して返す。2回目以降はそのまま返す。"""
+    """ウェルカムメッセージ送信時、USAGE_NOTICE をまだ表示していなければ先頭に追加して返す。"""
     if not await conv.has_seen_notice(user_id):
         await conv.mark_notice_seen(user_id)
         return [USAGE_NOTICE] + msgs
@@ -109,7 +109,7 @@ async def webhook(request: Request, background_tasks: BackgroundTasks) -> Respon
     """LINE Webhook エンドポイント。
 
     署名検証とイベント解析のみ同期的に行い、メッセージ処理はバックグラウンドに委譲して
-    即座に 200 を返す。LINE は 5 秒以内に 200 を受け取らないとタイムアウトするため。
+    即座に 200 を返す。LINE は数秒以内に 200 を受け取らないとタイムアウトするため。
     """
     body = await request.body()
     signature = request.headers.get("X-Line-Signature", "")
@@ -149,6 +149,14 @@ async def _handle_message(user_id: str, reply_token: str, user_text: str) -> Non
         reply_token: LINE リプライトークン。
         user_text: ユーザーのメッセージ本文。
     """
+    try:
+        await _process_message(user_id, reply_token, user_text)
+    except Exception as e:
+        logger.error("unhandled error user_id=%s: %s", user_id, e, exc_info=True)
+
+
+async def _process_message(user_id: str, reply_token: str, user_text: str) -> None:
+    """_handle_message の実処理。BackgroundTask 内の全例外をここで発生させる。"""
     # --- リッチメニューコマンドの処理（Claude呼び出し不要）---
     if user_text == CMD_END_CONVERSATION:
         await conv.clear_history(user_id)
