@@ -9,7 +9,7 @@ import os
 
 import anthropic
 import httpx
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 
 import conversation as conv
 from system_prompt import get_advisor_prompt, get_teacher_prompt, get_teacher_welcome
@@ -38,7 +38,7 @@ ADVISOR_WELCOME = (
 
 USAGE_NOTICE = (
     "【ご利用にあたって】\n"
-    "・15分以上の無操作でサーバーが再起動し、返答が遅くなることがあります\n"
+    "・15分以上の無操作後の初回メッセージは返答が届かない場合があります。届かない場合は再送してください\n"
     "・会話履歴は当日中のみ保持されます（日付が変わると翌日に新セッション開始）\n"
     "・ロール切替（先生役↔相談役）を行うと当日の会話履歴がリセットされます\n"
     "・直近20ターンを超えると古い履歴から削除されます"
@@ -97,8 +97,12 @@ async def _reply_line(reply_token: str, texts: str | list[str]) -> None:
 
 
 @app.post("/webhook")
-async def webhook(request: Request) -> Response:
-    """LINE Webhook エンドポイント。"""
+async def webhook(request: Request, background_tasks: BackgroundTasks) -> Response:
+    """LINE Webhook エンドポイント。
+
+    署名検証とイベント解析のみ同期的に行い、メッセージ処理はバックグラウンドに委譲して
+    即座に 200 を返す。LINE は 5 秒以内に 200 を受け取らないとタイムアウトするため。
+    """
     body = await request.body()
     signature = request.headers.get("X-Line-Signature", "")
 
@@ -109,7 +113,6 @@ async def webhook(request: Request) -> Response:
         data = json.loads(body)
     except json.JSONDecodeError:
         logger.error("Invalid JSON body received")
-        # LINEには200を返してリトライさせない
         return Response(content="OK", status_code=200)
 
     for event in data.get("events", []):
@@ -125,7 +128,7 @@ async def webhook(request: Request) -> Response:
             continue
 
         user_text = event["message"]["text"].strip()
-        await _handle_message(user_id, reply_token, user_text)
+        background_tasks.add_task(_handle_message, user_id, reply_token, user_text)
 
     return Response(content="OK", status_code=200)
 
