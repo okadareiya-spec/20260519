@@ -188,7 +188,7 @@ OK例：3日間を計画的に使用。12時間で90%完成、残り12時間で�
 
 def get_advisor_prompt() -> str:
     """相談役システムプロンプトを返す。"""
-    return build_advisor_prompt(PRINCIPLES)
+    return build_advisor_prompt(PRINCIPLES, CORE_OF_CORE_URL, PRINCIPLE_PAGES, PRINCIPLE_NAMES)
 
 
 def get_teacher_prompt() -> str:
