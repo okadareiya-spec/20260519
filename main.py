@@ -55,10 +55,10 @@ app = FastAPI()
 
 
 async def _with_notice(user_id: str, msgs: list[str]) -> list[str]:
-    """ウェルカムメッセージ送信時、USAGE_NOTICE をまだ表示していなければ先頭に追加して返す。"""
+    """ウェルカムメッセージ送信時、USAGE_NOTICE をまだ表示していなければ先頭メッセージに連結して返す。"""
     if not await conv.has_seen_notice(user_id):
         await conv.mark_notice_seen(user_id)
-        return [USAGE_NOTICE] + msgs
+        return [msgs[0] + "\n\n" + USAGE_NOTICE] + msgs[1:]
     return msgs
 
 
