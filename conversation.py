@@ -95,3 +95,31 @@ async def save_role(user_id: str, role: str) -> None:
         role: 'advisor' または 'teacher'。
     """
     await _redis.set(_role_key(user_id), role, ex=_ROLE_TTL)
+
+
+_NOTICE_PREFIX = "lion:notice"
+
+
+def _notice_key(user_id: str) -> str:
+    return f"{_NOTICE_PREFIX}:{user_id}"
+
+
+async def has_seen_notice(user_id: str) -> bool:
+    """ユーザーが利用案内を表示済みかどうかを返す。
+
+    Args:
+        user_id: LINE ユーザーID。
+
+    Returns:
+        表示済みなら True。
+    """
+    return bool(await _redis.exists(_notice_key(user_id)))
+
+
+async def mark_notice_seen(user_id: str) -> None:
+    """ユーザーの利用案内を表示済みにする（TTLなし・永続）。
+
+    Args:
+        user_id: LINE ユーザーID。
+    """
+    await _redis.set(_notice_key(user_id), "1")

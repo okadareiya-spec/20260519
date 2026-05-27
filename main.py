@@ -54,6 +54,14 @@ TEACHER_WELCOME = get_teacher_welcome()
 app = FastAPI()
 
 
+async def _with_notice(user_id: str, msgs: list[str]) -> list[str]:
+    """初回のみ USAGE_NOTICE を先頭に追加して返す。2回目以降はそのまま返す。"""
+    if not await conv.has_seen_notice(user_id):
+        await conv.mark_notice_seen(user_id)
+        return [USAGE_NOTICE] + msgs
+    return msgs
+
+
 def _verify_signature(body: bytes, signature: str) -> bool:
     """LINE Webhook の署名を検証する。"""
     expected = hmac.new(
@@ -149,13 +157,13 @@ async def _handle_message(user_id: str, reply_token: str, user_text: str) -> Non
     if user_text == CMD_SWITCH_TEACHER:
         await conv.clear_history(user_id)
         await conv.save_role(user_id, "teacher")
-        await _reply_line(reply_token, [USAGE_NOTICE, TEACHER_WELCOME])
+        await _reply_line(reply_token, await _with_notice(user_id, [TEACHER_WELCOME]))
         return
 
     if user_text == CMD_SWITCH_ADVISOR:
         await conv.clear_history(user_id)
         await conv.save_role(user_id, "advisor")
-        await _reply_line(reply_token, [USAGE_NOTICE, ADVISOR_WELCOME])
+        await _reply_line(reply_token, await _with_notice(user_id, [ADVISOR_WELCOME]))
         return
 
     # --- 通常メッセージの処理 ---
@@ -194,7 +202,7 @@ async def _handle_message(user_id: str, reply_token: str, user_text: str) -> Non
     # 新セッション時はウェルカムメッセージとAI返答を1回のAPI呼び出しでまとめて送る
     # （Reply トークンは1回しか使えないため、分けて送ると2回目が 400 Invalid reply token になる）
     if is_new_session:
-        await _reply_line(reply_token, [USAGE_NOTICE, welcome, reply_text])
+        await _reply_line(reply_token, await _with_notice(user_id, [welcome, reply_text]))
     else:
         await _reply_line(reply_token, reply_text)
 
